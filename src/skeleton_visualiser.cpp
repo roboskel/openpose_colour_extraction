@@ -119,6 +119,12 @@ public:
     }
     return;
   }
+
+  void binningFeature(){
+    
+    return;
+  }
+
   void imageCb(const sensor_msgs::ImageConstPtr &msg)
   {
     ROS_INFO("Just got a new image!");
