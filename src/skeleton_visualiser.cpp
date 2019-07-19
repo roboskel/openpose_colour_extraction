@@ -34,7 +34,7 @@
 #include <math.h>
 
 
-#define NUM_OF_BINS 50 //Max: 256
+#define NUM_OF_BINS 100 //Max: 256 You may twick this value!
 
 using namespace std;
 
@@ -46,6 +46,11 @@ This node attempts to visualise the OpenPose data streamed by a bag without the 
 
 static const std::string OPENCV_WINDOW = "Skeleton Tracker Video";
 static const std::string OPENCV_HISTOGRAM = "Histogram";
+//static const std::string OPENCV_HISTOGRAM_COMPARISON_1 = "Old Histogram";
+//static const std::string OPENCV_HISTOGRAM_COMPARISON_2 = "New Histogram";
+static const std::string OPENCV_WINDOW_COMPARISON_1 = "Old Image";
+static const std::string OPENCV_WINDOW_COMPARISON_2 = "New Image";
+
 std::vector<std::tuple<int, int>> tl;
 
 struct Color
@@ -71,7 +76,10 @@ class ImageConverter
   std::vector<int> tracking_ids = {0, 1, 2, 3, 4, 5, 6, 7, 8}; //Default tracking ids
   std::vector<Color> color_of_ids = {{66, 245, 135}, {245, 66, 81}, {48, 65, 194}, {136, 77, 161}, {82, 220, 227}, {227, 176, 82}, {176, 105, 55}, {173, 181, 109}, {64, 133, 88}};
   cv_bridge::CvImagePtr cv_ptr;
+  cv_bridge::CvImagePtr cv_ptr_oldImage;
   cv_bridge::CvImage hist_msg;
+  std::vector<cv::Mat>* oldHist = new std::vector<cv::Mat>;  //Store the previous histogram. Compare the old one with the new one and match the ids.
+  std::vector<cv::Mat>* newHist = new std::vector<cv::Mat>;      //Store the new histogram. We will be comparing those.
 
 public:
   ImageConverter()
@@ -84,8 +92,12 @@ public:
     histogram_pub_ = it_.advertise("/Histogram",1);
     skeleton_points_pub_ = nh_.advertise<image_processing_by_pose::Skeletons>("/skeleton_points", 1);
 
-    cv::namedWindow(OPENCV_WINDOW);
-    cv::namedWindow(OPENCV_HISTOGRAM, CV_WINDOW_AUTOSIZE);
+    //cv::namedWindow(OPENCV_WINDOW);
+    //cv::namedWindow(OPENCV_HISTOGRAM, CV_WINDOW_AUTOSIZE);
+    //cv::namedWindow(OPENCV_HISTOGRAM_COMPARISON_1);
+    //cv::namedWindow(OPENCV_HISTOGRAM_COMPARISON_2);
+    cv::namedWindow(OPENCV_WINDOW_COMPARISON_1);
+    cv::namedWindow(OPENCV_WINDOW_COMPARISON_2);
 
     //Define point pairs that will be connected to form a skeleton.
     tl.push_back(std::make_tuple(0, 1));
@@ -116,15 +128,19 @@ public:
 
   ~ImageConverter()
   {
-    cv::destroyWindow(OPENCV_WINDOW);
-    cv::destroyWindow(OPENCV_HISTOGRAM);
+    //cv::destroyWindow(OPENCV_WINDOW);
+    //cv::destroyWindow(OPENCV_HISTOGRAM);
+    //cv::destroyWindow(OPENCV_HISTOGRAM_COMPARISON_1);
+    //cv::destroyWindow(OPENCV_HISTOGRAM_COMPARISON_2);
+    cv::destroyWindow(OPENCV_WINDOW_COMPARISON_1);
+    cv::destroyWindow(OPENCV_WINDOW_COMPARISON_2);
   }
 
   void openposeCB(const openpose_ros_msgs::OpenPoseHumanList::ConstPtr &msg)
   {
     //First clear the vector for the new data to take place.
     humans.clear();
-    ROS_INFO("Number of recognised people: [%d]", msg->num_humans);
+    //ROS_INFO("Number of recognised people: [%d]", msg->num_humans);
     humans.reserve(msg->num_humans);
     for (const auto &person : msg->human_list)
     {
@@ -148,14 +164,14 @@ public:
 
       //ROS_INFO("Two edges! : Point1: x[%d] y[%d]  Point2:  x[%d] y[%d]", edge1.x,edge1.y,edge2.x, edge2.y);
 
-      cv::line(mask, edge1, edge2, CV_RGB(255, 255, 255), 1); //You may twick the thickness of the line. The more thick, the more points on the image.
+      cv::line(mask, edge1, edge2, CV_RGB(255, 255, 255), 2); //You may twick the thickness of the line (last parameter). The more thick, the more points on the image.
     }
     return mask;
   }
 
 
   cv::Mat HSHistogramAndDraw(const cv::Mat& mask)
-{
+  {
     cv::Mat hsvImage;
     cv::cvtColor(cv_ptr->image, hsvImage, CV_BGR2HSV);
 
@@ -177,6 +193,9 @@ public:
              histHS, 2, histSize, ranges,
              true, // the histogram is uniform
              false );
+
+    //normalize( histHS, histHS, 0, 1, cv::NORM_MINMAX, -1, cv::Mat() ); //???
+
     double maxVal=0;
     cv::minMaxLoc(histHS, 0, &maxVal, 0, 0);
 
@@ -200,7 +219,7 @@ public:
     cv::waitKey(4);
 
     return histHS;
-}
+  }
 
   cv::Mat ThreeDimensionalColorHistogram(const cv::Mat& mask)
   {
@@ -311,6 +330,12 @@ public:
 
   void VisualFeatures()
   {
+    //Extract visual features from the skeleton.
+    oldHist->clear();
+    if(oldHist->empty()) cout <<"\n\nYES IT IS EMPTY!!!\n\n";
+    //A new histogram will be created by the new frame. Update the old one.
+    *oldHist = *newHist;
+    newHist->clear();
     //For every Skeleton in the frame we find a mask and pass it to functions like 3DHistogram etc. .  Then, we publish the desired histogram.
     for (std::vector<cv::Point> oneHuman : humanEdges)
     {
@@ -318,7 +343,7 @@ public:
       const cv::Mat& mask = MaskCalculation(oneHuman);
       //const std::vector<cv::Mat>& histVect  = ColorHistogram(mask);  const cv::Mat& hist = histVect[0]; //Other options: ... = histVect[1] or ... = histVect[2]
       //const cv::Mat& hist = ThreeDimensionalColorHistogram(mask);
-      //const cv::Mat& hist = HSHistogramAndDraw(mask);
+      const cv::Mat& hist = HSHistogramAndDraw(mask);
 
       //Want to draw a histogram live? Uncomment the first line.
       //DrawHistogram3chanels(histVect[0], histVect[1], histVect[2], NUM_OF_BINS);
@@ -330,13 +355,57 @@ public:
       //hist_msg.image = hist; 
       //histogram_pub_.publish(hist_msg.toImageMsg());
 
+      //Update the 'global' variables.
+      newHist->push_back(hist);
+
     }
+    return;
+  }
+
+  std::vector<std::vector<double>> FramesFeatureComparison(){
+    //Always use it after VisualFeatures().
+
+      //In the begining the oldHist is empty. If that is the case, return.
+      if (oldHist->empty()) return;
+      printf("\n\nComparison of people's Histograms between two consecutive frames. \n\n");
+      std::vector<std::vector<double>> Scores;
+      for( int compare_method = 0; compare_method < 4; compare_method++ )
+      {
+        int counter=0;
+        printf("\n\nTable of Scores after Histogram Comparison method %d\n", compare_method);
+        printf("\told\tnew1\tnew2\tnew3\tnew4\tnew5\n");
+        for(cv::Mat OldPersonHist : *oldHist){
+          printf("%d",counter);
+          counter++;
+          std::vector<double> oneRaw;
+          for(cv::Mat NewPersonHist : *newHist){
+
+            double Score = cv::compareHist( OldPersonHist, NewPersonHist, compare_method );
+            printf("\t%1.3f",Score);
+            oneRaw.push_back(Score);
+            
+          }
+          if(compare_method==0)//Twick this! Posible values in {0,1,2,3}.
+            Scores.push_back(oneRaw);
+          printf("\n");
+        } 
+
+      }
+      printf("\n\n\n");
+
+    return Scores;
+  }
+
+  void ReIdentification(){
+
     return;
   }
 
   void imageCb(const sensor_msgs::ImageConstPtr &msg)
   {
-    ROS_INFO("Just got a new image!");
+    //ROS_INFO("Just got a new image!");
+    if(cv_ptr != NULL) cv_ptr_oldImage = cv_ptr;
+      //cv_ptr->image.copyTo(oldImage); //Store the old image for comparison.
 
     try
     {
@@ -350,6 +419,7 @@ public:
 
     //Get the skeleton points and store them.
     //We need those points for the feature extraction (e.g. histogram) before we draw lines on the image. That's why we have two main loops on this loop.
+    humanEdges.clear();
     for (std::vector<openpose_ros_msgs::OpenPoseHuman>::iterator itPersona = humans.begin(); itPersona != humans.end(); ++itPersona) //Loop for every skeleton (human).
     {
       std::vector<cv::Point> oneHumanEdges;
@@ -374,6 +444,7 @@ public:
     }
 
     VisualFeatures();
+    const std::vector<std::vector<double>>& Scores = FramesFeatureComparison();
 
     //Create a message of type skeletons to be published.
     image_processing_by_pose::Skeletons humansVect;
@@ -446,7 +517,8 @@ public:
     }
 
     // Update GUI Window
-    cv::imshow(OPENCV_WINDOW, cv_ptr->image);
+    cv::imshow(OPENCV_WINDOW_COMPARISON_2, cv_ptr->image); //New image
+    if(cv_ptr_oldImage != NULL) cv::imshow(OPENCV_WINDOW_COMPARISON_1,cv_ptr_oldImage->image); //Old image
     cv::waitKey(4);
 
     // Publish the vector of the underlying skeleton pixels of the image.
@@ -461,6 +533,16 @@ int main(int argc, char **argv)
 {
   ros::init(argc, argv, "skeleton_visualiser");
   ImageConverter ic;
-  ros::spin();
+  //ros::spin();
+  ros::Rate loop_rate(30);
+
+  while (ros::ok())
+  {
+    ros::spinOnce();
+
+    loop_rate.sleep();
+
+  }
+
   return 0;
 }
