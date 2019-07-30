@@ -1,0 +1,26 @@
+NUM_OF_BINS: 80                      #Max: 256 You may twick this value!
+THRESHOLD_SKELETON_POSIBILITY: 0.45  #Over this possibility the points will be detected.
+LOWEST_POSIBILITY_MATCHING: 0.1      #Over this possibility we match an id of the previous frame to an id of the new frame.
+LOWEST_POSIBILITY_REMATCHING: 0.1    #Over this possibility we match an old dissapeared id to a newly apeared.
+OLD_HISTOGRAM_MEMORY_SIZE: 10        #Size of the buffer of dissapeared histograms. If this is too big the algorithm will run slow.
+LOOP_RATE: 60                        #The rate at withch the node recieves a new image. Publishing rates are also affected.
+LINE_WIDTH: 4                        #If > 1 then in the process of mask creation, adjacent pixels to the line are included.
+COMPARE_METHOD: 0    # 0 -> Correlation
+                     # 1 -> Chi-Square
+                     # 2 -> Intersection
+                     # 3 -> Bhattacharyya distance
+                     # Carefull! For the Chi-Square and Bhattacharyya distance methods, the lower the metric, the more accurate the match.
+                     #Consequently, if we use 1 or 3 methods we need to amend the code and alter the inequalities in the 
+                     #Reidentification method so as to find the minimum element.
+                     #If the comparing method changes, the possibility thresholds (apart from THRESHOLD_SKELETON_POSIBILITY) should change too.
+FEATURE_EXTRACTOR_METHOD: 2  # 0 -> simple 1 chanell color histogram. Usefull if we want to plot the histogram of an image.
+                             # 1 -> 3D color histogram
+                             # 2 -> 2D HS histogram
+AND_SPINE: 1 # 1-> feature extraction from shoulder and spine points.
+             # 0-> feature extraction from shoulders only.
+CAMERA_TOPIC: "/camera/rgb/image_raw"
+OPENPOSE_ROS_TOPIC: "/openpose_ros/human_list"
+OUTPUT_VIDEO_TOPIC: "/image_converter/output_video"
+OUTPUT_HISTOGRAM_TOPIC: "/Histogram"
+OUTPUT_SKELETON_POINTS: "/skeleton_points"
+IDS: "/id_array"

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<launch>
+    <node pkg="image_processing_by_pose" type="skeleton_visualiser" respawn="false" name="image_processing_by_pose" output="screen">
+        <rosparam file="$(find image_processing_by_pose)/config/parameters.yaml" command="load" />
+    </node>
+</launch>

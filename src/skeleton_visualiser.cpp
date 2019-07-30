@@ -2,14 +2,15 @@
 #include <vector>
 #include <tuple>
 #include <bits/stdc++.h>
-#include "std_msgs/Float32.h"
-#include "std_msgs/Int16.h"
 
 #include <string>
 #include <ros/ros.h>
 #include <sensor_msgs/Image.h>
 #include <image_transport/image_transport.h>
 #include <sensor_msgs/image_encodings.h>
+
+#include "std_msgs/Float32.h"
+#include "std_msgs/Int16.h"
 
 #include "std_msgs/MultiArrayLayout.h"
 #include "std_msgs/MultiArrayDimension.h"
@@ -33,19 +34,55 @@
 
 #include <math.h>
 
-#define NUM_OF_BINS 80 //Max: 256 You may twick this value!
-#define THRESHOLD_POSIBILITY 0.45 //Over this possibility the points will be detected.
-#define LOWEST_POSIBILITY_MATCHING 0.1
-#define LOWEST_POSIBILITY_REMATCHING 0.1
-#define OLD_HISTOGRAM_MEMORY_SIZE 10
-#define LOOP_RATE 60
-#define LINE_WIDTH 4
-#define COMPARE_METHOD 0
-#define FEATURE_EXTRACTOR_METHOD 2
-#define AND_SPINE 1 // 1-> feature extraction from shoulder and spine points.
-                    // 0-> feature extraction from shoulders only.
 
-using namespace std;
+//Default parameters. If a parametrers.yamal file exists, those parameters will be overwriten.
+int NUM_OF_BINS = 80; //Max: 256 You may twick this value!
+double THRESHOLD_SKELETON_POSIBILITY = 0.45; //Over this possibility the points will be detected.
+double LOWEST_POSIBILITY_MATCHING = 0.1; //Over this possibility we match an id of the previous frame to an id of the new frame.
+double LOWEST_POSIBILITY_REMATCHING = 0.1; //Over this possibility we match an old dissapeared id to a newly apeared.
+int OLD_HISTOGRAM_MEMORY_SIZE = 10;    //Size of the buffer of dissapeared histograms. If this is too big the algorithm will run slow.
+int LOOP_RATE = 60;  //The rate at withch the node recieves a new image. Publishing rates are also affected.
+int LINE_WIDTH = 4;  //If > 1 then in the process of mask creation, adjacent pixels to the line are included.
+int COMPARE_METHOD = 0;    // 0 -> Correlation
+                            // 1 -> Chi-Square
+                            // 2 -> Intersection
+                            // 3 -> Bhattacharyya distance
+                            //Carefull! For the Chi-Square and Bhattacharyya distance methods, the lower the metric, the more accurate the match.
+                            //Consequently, if we use 1 or 3 methods we need to amend the code and alter the inequalities in the 
+                            //Reidentification method so as to find the minimum element.
+                            //If the comparing method changes, the possibility thresholds (apart from THRESHOLD_SKELETON_POSIBILITY) should change too.
+int FEATURE_EXTRACTOR_METHOD = 2; // 0 -> simple 1 chanell color histogram. Usefull if we want to plot the histogram of an image.
+                                  // 1 -> 3D color histogram
+                                  //2d HS histogram
+int AND_SPINE = 1; // 1-> feature extraction from shoulder and spine points.
+                    // 0-> feature extraction from shoulders only.
+std::string CAMERA_TOPIC = std::string("/camera/rgb/image_raw");
+std::string OPENPOSE_ROS_TOPIC = std::string("/openpose_ros/human_list");
+std::string OUTPUT_VIDEO_TOPIC = std::string("/image_converter/output_video");
+std::string OUTPUT_HISTOGRAM_TOPIC = std::string("/Histogram");
+std::string OUTPUT_SKELETON_POINTS = std::string("/skeleton_points");
+std::string IDS = std::string("/id_array");
+
+
+
+//Parameter System.
+int num_of_bins;
+double threshold_skeleton_posibility;
+double lowest_posibility_matching;
+double lowest_posibility_rematching;
+int old_histogram_memory_size;
+int loop_rate;
+int line_width;
+int compare_method;
+int feature_extractor_method;
+int and_spine;
+std::string camera_topic;
+std::string openpose_ros_topic;
+std::string output_video_topic;
+std::string output_histogram_topic;
+std::string output_skeleton_points;
+std::string ids;
+
 
 /*
 This node attempts to visualise the OpenPose data streamed by a bag without the need of an openpose instalation.
@@ -81,6 +118,7 @@ class ImageConverter
   image_transport::Publisher image_pub_;
   image_transport::Publisher histogram_pub_;
   ros::Publisher skeleton_points_pub_;
+  ros::Publisher ids_pub_;
 
   std::vector<std::vector<cv::Point>> humanEdges; //Store the skeleton points that we want to consider for the mask of the histogram
   ros::Subscriber human_list_;
@@ -95,16 +133,22 @@ class ImageConverter
   std::vector<cv::Mat> *dissapearedHist = new std::vector<cv::Mat>; //Stores the dissapeared histograms
   std::vector<int> dissapearedIds;                                  //Stores the dissapeared ids.
 
+  
+
 public:
   ImageConverter()
       : it_(nh_)
   {
+
+    std::cout <<" \nThe class is created11!\n";
+
     // Subscrive to input video feed & to OpenPoseHumanList and publish output video feed
-    image_sub_ = it_.subscribe("/camera/rgb/image_raw", 1, &ImageConverter::imageCb, this);
-    human_list_ = nh_.subscribe("/openpose_ros/human_list", 1, &ImageConverter::openposeCB, this);
-    image_pub_ = it_.advertise("/image_converter/output_video", 1);
-    histogram_pub_ = it_.advertise("/Histogram", 1);
-    skeleton_points_pub_ = nh_.advertise<image_processing_by_pose::Skeletons>("/skeleton_points", 1);
+    image_sub_ = it_.subscribe(camera_topic, 1, &ImageConverter::imageCb, this);
+    human_list_ = nh_.subscribe(openpose_ros_topic, 1, &ImageConverter::openposeCB, this);
+    image_pub_ = it_.advertise(output_video_topic, 1);
+    histogram_pub_ = it_.advertise(output_histogram_topic, 1);
+    skeleton_points_pub_ = nh_.advertise<image_processing_by_pose::Skeletons>(output_skeleton_points, 1);
+    ids_pub_ = nh_.advertise<std_msgs::Int32MultiArray>(ids, 1);
 
     //cv::namedWindow(OPENCV_WINDOW);
     //cv::namedWindow(OPENCV_HISTOGRAM, CV_WINDOW_AUTOSIZE);
@@ -179,7 +223,7 @@ public:
 
       //ROS_INFO("Two edges! : Point1: x[%d] y[%d]  Point2:  x[%d] y[%d]", edge1.x,edge1.y,edge2.x, edge2.y);
 
-      cv::line(mask, edge1, edge2, CV_RGB(255, 255, 255), LINE_WIDTH); //You may twick the thickness of the line (last parameter). The more thick, the more points on the image.
+      cv::line(mask, edge1, edge2, CV_RGB(255, 255, 255), line_width); //You may twick the thickness of the line (last parameter). The more thick, the more points on the image.
     }
     return mask;
   }
@@ -239,7 +283,7 @@ public:
   {
     int imgCount = 1;
     int dims = 3;
-    const int sizes[] = {NUM_OF_BINS, NUM_OF_BINS, NUM_OF_BINS};
+    const int sizes[] = {num_of_bins, num_of_bins, num_of_bins};
     const int channels[] = {0, 1, 2};
     float rRange[] = {0, 256};
     float gRange[] = {0, 256};
@@ -261,7 +305,7 @@ public:
     cv::split(cv_ptr->image, bgr_planes);
 
     // Establish the number of bins.
-    int histSize = NUM_OF_BINS;
+    int histSize = num_of_bins;
 
     // Set the ranges ( for (B,G,R) )
     float range[] = {0, 256};
@@ -353,20 +397,19 @@ public:
     {
       cv::Mat h_b, h_g, h_r;
       const cv::Mat &mask = MaskCalculation(oneHuman);
-      int x = FEATURE_EXTRACTOR_METHOD;
       
-      if(FEATURE_EXTRACTOR_METHOD == 0){
+      if(feature_extractor_method == 0){
         const std::vector<cv::Mat>& histVect  = ColorHistogram(mask);  const cv::Mat& hist = histVect[0]; //Other options: ... = histVect[1] or ... = histVect[2]
         newHist->push_back(hist);
         //Want to draw a histogram live? Uncomment the first line. Only if you use method 0.
-        //DrawHistogram3chanels(histVect[0], histVect[1], histVect[2], NUM_OF_BINS);
-        //DrawHistogram1chanel(hist[0], NUM_OF_BINS);
+        //DrawHistogram3chanels(histVect[0], histVect[1], histVect[2], num_of_bins);
+        //DrawHistogram1chanel(hist[0], num_of_bins);
       }
-      else if(FEATURE_EXTRACTOR_METHOD == 1){
+      else if(feature_extractor_method == 1){
         const cv::Mat& hist = ThreeDimensionalColorHistogram(mask);
         newHist->push_back(hist);
       }
-      else if(FEATURE_EXTRACTOR_METHOD == 2){
+      else if(feature_extractor_method == 2){
         const cv::Mat &hist = HSHistogramAndDraw(mask);
         newHist->push_back(hist);
       }
@@ -396,11 +439,15 @@ public:
     if (oldHist->empty() || newHist->empty())
       return Scores;
     printf("\n\nComparison of people's Histograms between two consecutive frames. \n\n");
-    //for (int compare_method = 0; compare_method < 4; compare_method++)
+    
+    int comp_meth = compare_method;
+
+    //Want to print all methods? Uncomment the next line.
+    //for (int comp_meth = 0; comp_meth < 4; comp_meth++)
     {
-      int compare_method = 0;
+      
       int rowCounter = 0;
-      printf("\n\nTable of Scores after Histogram Comparison method %d\n", compare_method);
+      printf("\n\nTable of Scores after Histogram Comparison method %d\n", comp_meth);
       printf("old\tnew1\tnew2\tnew3\tnew4\tnew5\n");
       for (cv::Mat OldPersonHist : *oldHist)
       {
@@ -412,14 +459,14 @@ public:
         for (cv::Mat NewPersonHist : *newHist)
         {
 
-          double Score = cv::compareHist(OldPersonHist, NewPersonHist, compare_method);
+          double Score = cv::compareHist(OldPersonHist, NewPersonHist, comp_meth);
           printf("\t%1.3f", Score);
-          if (compare_method == COMPARE_METHOD) //Twick this! Posible values in {0,1,2,3}.
+          if (comp_meth == compare_method) 
             Scores[rowCounter][colCounter] = Score;
           //oneRaw.push_back(Score);
           colCounter++;
         }
-        //if(compare_method==0)//Twick this! Posible values in {0,1,2,3}.
+        //if(compare_method==comp_meth)
         //Scores.push_back(oneRaw)
         printf("\n");
         rowCounter++;
@@ -432,29 +479,32 @@ public:
 
   std::vector<int> &ReIdentification(std::vector<std::vector<double>> Scores)
   {
+    //Create the array to be published.
+    std_msgs::Int32MultiArray arrayOfIds;
+    arrayOfIds.data.clear(); //Probably not required.
 
-    static int newId;
+    static int newId =0;
     //This method recives the matching scores and pairs the human ids in two consecutive frames.
     static std::vector<int> tracking_ids;
     if (newHist->empty())
     {
-      cout << "\n\nNEW HIST IS EMPTY\n\n";
+      std::cout << "\n\nNEW HIST IS EMPTY\n\n";
       tracking_ids.clear();
       return tracking_ids;
     }
     if (oldHist->empty())
     { //First time of calling OR format ids. Start from the beginning. Re-initialise id counter.
-      cout << "\n\nNEW HIST IS NOT EMPTY - OLD HIS IS EMPTY\n\n";
+      std::cout << "\n\nNEW HIST IS NOT EMPTY - OLD HIS IS EMPTY\n\n";
       //tracking_ids.reserve(newHist->size());
       int i;
-      for (i = 0; i < newHist->size(); i++)
+      for (i = newId; i < newHist->size(); i++)
       {
         tracking_ids.push_back(i);
       }
-      newId = i;
+      newId = i; 
       return tracking_ids;
     }
-    cout << "\n\nBOATH NEW AND OLD HIST ARE NOT EMPTY\n\n";
+    std::cout << "\n\nBOATH NEW AND OLD HIST ARE NOT EMPTY\n\n";
     std::vector<std::tuple<int, int>> maxPos; //Stores the positions of the maximum elements, in decending order
     //(from the position of the globally greater element -> the position of the globally minimum element.)
 
@@ -488,13 +538,13 @@ public:
           }
         }
       }
-      cout << "\n\nFound Max value: " << max << "  at position: " << maxPosRaw << ", " << maxPosCol << "\n\n";
+      std::cout << "\n\nFound Max value: " << max << "  at position: " << maxPosRaw << ", " << maxPosCol << "\n\n";
 
       //Delete the raw we took into acount. We need this because otherwise there is the posibility of mathcing the old id to two different
       // new ids. We want the mapping to be 1-1. Similarly, we have to erase the posibility of mapping two rows to one column (two old ids
       // into one new id).
       //Scores[maxPosRaw].clear();
-      if (max < LOWEST_POSIBILITY_MATCHING)
+      if (max < lowest_posibility_matching)
         break; //If the possibility is too low, stop matching ids. Twick this value!
       for (int j = 0; j < columns; j++)
       {
@@ -547,9 +597,9 @@ public:
       order++;
     }
 
-    while (dissapearedIds.size() > OLD_HISTOGRAM_MEMORY_SIZE)
+    while (dissapearedIds.size() > old_histogram_memory_size)
     {
-      int advancement = dissapearedIds.size() - OLD_HISTOGRAM_MEMORY_SIZE;
+      int advancement = dissapearedIds.size() - old_histogram_memory_size;
       std::vector<int>::iterator itId1, itId2;
       itId1 = itId2 = dissapearedIds.begin();
       advance(itId2, advancement);
@@ -581,7 +631,7 @@ public:
               maxRow = i;
             }
           }
-          if(maxim >= LOWEST_POSIBILITY_REMATCHING){//Twick this value!
+          if(maxim >= lowest_posibility_rematching){//Twick this value!
             std::cout <<"\nRe found a dissapeared person!\nID: " << dissapearedIds[maxRow] << "\n";
             newIds[j]=dissapearedIds[maxRow];
             //Delete the histogram and the id in case of a hit.
@@ -735,7 +785,11 @@ public:
 
     tracking_ids.clear();
     tracking_ids = newIds;
-
+    for( auto l : tracking_ids){
+      arrayOfIds.data.push_back(l);
+    }
+    //We publish the new array of ids.
+    ids_pub_.publish(arrayOfIds);
     // for (std::vector<int>::iterator i = newIds.begin(); i != newIds.end(); ++i){
     //   tracking_ids.push_back(*i);
     // }
@@ -745,7 +799,7 @@ public:
 
   void imageCb(const sensor_msgs::ImageConstPtr &msg)
   {
-    //ROS_INFO("Just got a new image!");
+    ROS_INFO("Just got a new image!");
     if (cv_ptr != NULL)
       cv_ptr_oldImage = cv_ptr;
     //cv_ptr->image.copyTo(oldImage); //Store the old image for comparison.
@@ -772,12 +826,12 @@ public:
       for (std::vector<std::tuple<int, int>>::iterator it = tl.begin(); it != tl.end(); ++it) //Iterate for all points on a single detected skeleton (human).
       {
         //Ignore points with zero probability.
-        if (itPersona->body_key_points_with_prob[std::get<1>(*it)].prob < THRESHOLD_POSIBILITY || itPersona->body_key_points_with_prob[std::get<0>(*it)].prob < THRESHOLD_POSIBILITY) //Twick these values!
+        if (itPersona->body_key_points_with_prob[std::get<1>(*it)].prob < threshold_skeleton_posibility || itPersona->body_key_points_with_prob[std::get<0>(*it)].prob < threshold_skeleton_posibility) //Twick these values!
           continue;
         cv::Point edge1 = cv::Point(itPersona->body_key_points_with_prob[std::get<0>(*it)].x, itPersona->body_key_points_with_prob[std::get<0>(*it)].y);
         cv::Point edge2 = cv::Point(itPersona->body_key_points_with_prob[std::get<1>(*it)].x, itPersona->body_key_points_with_prob[std::get<1>(*it)].y);
 
-        if ((std::get<0>(*it) == 1 || std::get<1>(*it) == 1) && (std::get<0>(*it) != 0 && std::get<1>(*it) != 0) && ((std::get<0>(*it) != 8 && std::get<1>(*it) != 8)|| AND_SPINE))
+        if ((std::get<0>(*it) == 1 || std::get<1>(*it) == 1) && (std::get<0>(*it) != 0 && std::get<1>(*it) != 0) && ((std::get<0>(*it) != 8 && std::get<1>(*it) != 8)|| and_spine))
         { //We only want to store the edges on the spine and the shoulders.
 
           //Store the two edges of the line.
@@ -825,7 +879,7 @@ public:
       //Draw the dots.
       for (int i = 0; i < (itPersona->body_key_points_with_prob).size(); ++i)
       {
-        if (itPersona->body_key_points_with_prob[i].prob < THRESHOLD_POSIBILITY)
+        if (itPersona->body_key_points_with_prob[i].prob < threshold_skeleton_posibility)
           continue; //Twick this value.
         cv::circle(cv_ptr->image, cv::Point(itPersona->body_key_points_with_prob[i].x, itPersona->body_key_points_with_prob[i].y), 2,
                    CV_RGB(color_of_ids[(*itIds) % 10].r, color_of_ids[(*itIds) % 10].g, color_of_ids[(*itIds) % 10].b));
@@ -835,7 +889,7 @@ public:
       for (std::vector<std::tuple<int, int>>::iterator it = tl.begin(); it != tl.end(); ++it) //Iterate for all points on a single detected skeleton (human).
       {
         //Do not draw lines with near zero probability.
-        if (itPersona->body_key_points_with_prob[std::get<1>(*it)].prob < THRESHOLD_POSIBILITY || itPersona->body_key_points_with_prob[std::get<0>(*it)].prob < THRESHOLD_POSIBILITY)
+        if (itPersona->body_key_points_with_prob[std::get<1>(*it)].prob < threshold_skeleton_posibility || itPersona->body_key_points_with_prob[std::get<0>(*it)].prob < threshold_skeleton_posibility)
           continue;
         cv::Point edge1 = cv::Point(itPersona->body_key_points_with_prob[std::get<0>(*it)].x, itPersona->body_key_points_with_prob[std::get<0>(*it)].y);
         cv::Point edge2 = cv::Point(itPersona->body_key_points_with_prob[std::get<1>(*it)].x, itPersona->body_key_points_with_prob[std::get<1>(*it)].y);
@@ -898,9 +952,28 @@ public:
 int main(int argc, char **argv)
 {
   ros::init(argc, argv, "skeleton_visualiser");
+  ros::NodeHandle n;
+  //Load the parameters from *.yamal file, if it exists.
+  n.param("CAMERA_TOPIC", camera_topic, CAMERA_TOPIC);
+  n.param("OPENPOSE_ROS_TOPIC", openpose_ros_topic, OPENPOSE_ROS_TOPIC);
+  n.param("OUTPUT_VIDEO_TOPIC", output_video_topic, OUTPUT_VIDEO_TOPIC);
+  n.param("OUTPUT_HISTOGRAM_TOPIC", output_histogram_topic, OUTPUT_HISTOGRAM_TOPIC);
+  n.param("OUTPUT_SKELETON_POINTS", output_skeleton_points, OUTPUT_SKELETON_POINTS);
+  n.param("IDS", ids, IDS);
+  n.param("NUM_OF_BINS", num_of_bins, NUM_OF_BINS);
+  n.param("THRESHOLD_SKELETON_POSIBILITY", threshold_skeleton_posibility, THRESHOLD_SKELETON_POSIBILITY);
+  n.param("LOWEST_POSIBILITY_MATCHING", lowest_posibility_matching, LOWEST_POSIBILITY_MATCHING);
+  n.param("LOWEST_POSIBILITY_REMATCHING", lowest_posibility_rematching, LOWEST_POSIBILITY_REMATCHING);
+  n.param("OLD_HISTOGRAM_MEMORY_SIZE", old_histogram_memory_size, OLD_HISTOGRAM_MEMORY_SIZE);
+  n.param("LOOP_RATE", loop_rate, LOOP_RATE);
+  n.param("LINE_WIDTH", line_width, LINE_WIDTH);
+  n.param("COMPARE_METHOD", compare_method, COMPARE_METHOD);
+  n.param("FEATURE_EXTRACTOR_METHOD", feature_extractor_method, FEATURE_EXTRACTOR_METHOD);
+  n.param("AND_SPINE", and_spine, AND_SPINE);
+
   ImageConverter ic;
   //ros::spin();
-  ros::Rate loop_rate(LOOP_RATE); //Determine the fps.
+  ros::Rate loop_rate(loop_rate); //Determine the fps.
 
   while (ros::ok())
   {
