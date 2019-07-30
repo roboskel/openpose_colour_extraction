@@ -37,8 +37,10 @@ To run the code, follow these steps:
 ## Version
 This package was developed and tested for `ROS Melodic`.
 
+
 ## Screenshots
 
 ![output image of two persons while walking and their drawn skeletons](https://i.ibb.co/HC63v64/Screenshot-from-2019-07-30-15-57-05.png)
 
 ![output image of three persons while talking and their drawn skeletons](https://i.ibb.co/Tgw5vcB/Screenshot-from-2019-07-30-16-09-56.png)
+
