@@ -140,8 +140,6 @@ public:
       : it_(nh_)
   {
 
-    std::cout <<" \nThe class is created11!\n";
-
     // Subscrive to input video feed & to OpenPoseHumanList and publish output video feed
     image_sub_ = it_.subscribe(camera_topic, 1, &ImageConverter::imageCb, this);
     human_list_ = nh_.subscribe(openpose_ros_topic, 1, &ImageConverter::openposeCB, this);
@@ -799,7 +797,7 @@ public:
 
   void imageCb(const sensor_msgs::ImageConstPtr &msg)
   {
-    ROS_INFO("Just got a new image!");
+    //ROS_INFO("Just got a new image!");
     if (cv_ptr != NULL)
       cv_ptr_oldImage = cv_ptr;
     //cv_ptr->image.copyTo(oldImage); //Store the old image for comparison.
