@@ -20,7 +20,7 @@ If one wants to run the code live without the use of custom rosbags, openpose an
 
 
 ## Usage
-To run the demo, follow these steps:
+To run the code, follow these steps:
 1. Clone the package in your src file.
 2. Get some rosbags with RGB and openpose topics (available at the lab or upon request). Otherwise, make sure you have RGB camera and openpose ROS up and running.
 2. cd to your workspace diractory and run catkin_make (let's assume you have sourced devel/setup.bash)
