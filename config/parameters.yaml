@@ -22,7 +22,9 @@ USE_SPACIAL_LOCALITY_TOO: 1     # 1-> use boath visual features and spatial prox
                                 # 0-> use only visual features.
 COMPARE_EVERYTHING: 1 #A cornercase. When dissapeared ids are not empty but old histogram is empty and new is not empty, check if the new person(s) match
                            # to a dissapeared histogram and if they do, do not create a new id (to do so, set COMPARE_EVERYTHING to 1). Otherwise, if old histogram is empty and new is not then new ids will
-                           #be created for sure. Seems to be better when set to 0.
+                           #be created for sure. Seems to be better when set to 0 althow it is wrong.
+PROXIMITY_WEIGHT: 2 #It only makes sence if USE_SPACIAL_LOCALITY_TOO ==1. Scores for comparison use two metrics: 1- how much the histograms look alike and 2- how close the skeletons are.
+                           #By setting proximity weight high, the proximity is more important than histogram comparison. Default: 1 If the ppl are moving fast then consider increasing this.
 CAMERA_TOPIC: "/camera/rgb/image_raw"
 OPENPOSE_ROS_TOPIC: "/openpose_ros/human_list"
 OUTPUT_VIDEO_TOPIC: "/image_converter/output_video"

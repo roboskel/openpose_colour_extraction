@@ -61,6 +61,8 @@ int USE_SPACIAL_LOCALITY_TOO =0; // 1-> use boath visual features and spatial pr
 int COMPARE_EVERYTHING =0; //A cornercase. When dissapeared ids are not empty but old histogram is empty and new is not empty, check if the new person(s) match
                           // to a dissapeared histogram and if they do, do not create a new id (to do so, set COMPARE_EVERYTHING to 1). Otherwise, if old histogram is empty and new is not then new ids will
                           //be created for sure. Seems to be better when set to 0.
+float PROXIMITY_WEIGHT =1; //It only makes sence if USE_SPACIAL_LOCALITY_TOO ==1. Scores for comparison use two metrics: 1- how much the histograms look alike and 2- how close the skeletons are.
+                           //By setting proximity weight high, the proximity is more important than histogram comparison.
 std::string CAMERA_TOPIC = std::string("/camera/rgb/image_raw");
 std::string OPENPOSE_ROS_TOPIC = std::string("/openpose_ros/human_list");
 std::string OUTPUT_VIDEO_TOPIC = std::string("/image_converter/output_video");
@@ -83,6 +85,7 @@ int feature_extractor_method;
 int and_spine;
 int use_spacial_locality_too;
 int compare_everything;
+float proximity_weight;
 std::string camera_topic;
 std::string openpose_ros_topic;
 std::string output_video_topic;
@@ -491,7 +494,7 @@ public:
         int colCounter = 0;
         for(cv::Point newPoint : *newHumanPlaces){
           double distance = cv::norm(cv::Mat(oldPoint),cv::Mat(newPoint));
-          Scores[rowCounter][colCounter] += 1/(distance+1); //You may need to change this if the comparison method changes.
+          Scores[rowCounter][colCounter] += std::min(proximity_weight * 1/(distance+1),1.0); //You may need to change this if the comparison method changes.
           printf("\t%1.3f", Scores[rowCounter][colCounter] );
           colCounter++;
         }
@@ -1025,7 +1028,9 @@ int main(int argc, char **argv)
   n.param("image_processing_by_pose/FEATURE_EXTRACTOR_METHOD", feature_extractor_method, FEATURE_EXTRACTOR_METHOD);
   n.param("image_processing_by_pose/AND_SPINE", and_spine, AND_SPINE);
   n.param("image_processing_by_pose/USE_SPACIAL_LOCALITY_TOO", use_spacial_locality_too, USE_SPACIAL_LOCALITY_TOO);
-   n.param("image_processing_by_pose/COMPARE_EVERYTHING", compare_everything, COMPARE_EVERYTHING);
+  n.param("image_processing_by_pose/COMPARE_EVERYTHING", compare_everything, COMPARE_EVERYTHING);
+  n.param("image_processing_by_pose/PROXIMITY_WEIGHT", proximity_weight, PROXIMITY_WEIGHT);
+   
   ImageConverter ic;
   //ros::spin();
   ros::Rate loop_rate(loop_rate); //Determine the fps.
