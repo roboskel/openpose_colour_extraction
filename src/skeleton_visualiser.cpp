@@ -53,9 +53,14 @@ int COMPARE_METHOD = 0;    // 0 -> Correlation
                             //If the comparing method changes, the possibility thresholds (apart from THRESHOLD_SKELETON_POSIBILITY) should change too.
 int FEATURE_EXTRACTOR_METHOD = 2; // 0 -> simple 1 chanell color histogram. Usefull if we want to plot the histogram of an image.
                                   // 1 -> 3D color histogram
-                                  //2d HS histogram
+                                  // 2 -> 2d HS histogram
 int AND_SPINE = 1; // 1-> feature extraction from shoulder and spine points.
                     // 0-> feature extraction from shoulders only.
+int USE_SPACIAL_LOCALITY_TOO =0; // 1-> use boath visual features and spatial proximity for tracking.
+                                // 0-> use only visual features.
+int COMPARE_EVERYTHING =0; //A cornercase. When dissapeared ids are not empty but old histogram is empty and new is not empty, check if the new person(s) match
+                          // to a dissapeared histogram and if they do, do not create a new id (to do so, set COMPARE_EVERYTHING to 1). Otherwise, if old histogram is empty and new is not then new ids will
+                          //be created for sure. Seems to be better when set to 0.
 std::string CAMERA_TOPIC = std::string("/camera/rgb/image_raw");
 std::string OPENPOSE_ROS_TOPIC = std::string("/openpose_ros/human_list");
 std::string OUTPUT_VIDEO_TOPIC = std::string("/image_converter/output_video");
@@ -76,6 +81,8 @@ int line_width;
 int compare_method;
 int feature_extractor_method;
 int and_spine;
+int use_spacial_locality_too;
+int compare_everything;
 std::string camera_topic;
 std::string openpose_ros_topic;
 std::string output_video_topic;
@@ -132,6 +139,8 @@ class ImageConverter
   std::vector<cv::Mat> *newHist = new std::vector<cv::Mat>;         //Store the new histogram. We will be comparing those.
   std::vector<cv::Mat> *dissapearedHist = new std::vector<cv::Mat>; //Stores the dissapeared histograms
   std::vector<int> dissapearedIds;                                  //Stores the dissapeared ids.
+  std::vector<cv::Point> *oldHumanPlaces = new std::vector<cv::Point>;
+  std::vector<cv::Point> *newHumanPlaces = new std::vector<cv::Point>;
 
   
 
@@ -390,6 +399,7 @@ public:
     //A new histogram will be created by the new frame. Update the old one.
     *oldHist = *newHist;
     newHist->clear();
+
     //For every Skeleton in the frame we find a mask and pass it to functions like 3DHistogram etc. .  Then, we publish the desired histogram.
     for (std::vector<cv::Point> oneHuman : humanEdges)
     {
@@ -427,7 +437,7 @@ public:
     return;
   }
 
-  std::vector<std::vector<double>> FramesFeatureComparison(std::vector<cv::Mat> *oldHist, std::vector<cv::Mat> *newHist)
+  std::vector<std::vector<double>> FramesFeatureComparison(std::vector<cv::Mat> *oldHist, std::vector<cv::Mat> *newHist, std::vector<cv::Point> *oldHumanPlaces = new std::vector<cv::Point>, std::vector<cv::Point> *newHumanPlaces = new std::vector<cv::Point>)
   {
     //Always use it after VisualFeatures().
 
@@ -472,6 +482,24 @@ public:
     }
     printf("\n\n");
 
+    //Use locality.
+    if(!oldHumanPlaces->empty() && !newHumanPlaces->empty()){
+      if(oldHumanPlaces->size() != oldHist->size() || newHumanPlaces->size() != newHist->size()) 
+        std::cout << "\nProblem: number of human histograms dose not equal the number of human points.\n";
+      int rowCounter = 0;
+      for(cv::Point oldPoint : *oldHumanPlaces){
+        int colCounter = 0;
+        for(cv::Point newPoint : *newHumanPlaces){
+          double distance = cv::norm(cv::Mat(oldPoint),cv::Mat(newPoint));
+          Scores[rowCounter][colCounter] += 1/(distance+1); //You may need to change this if the comparison method changes.
+          printf("\t%1.3f", Scores[rowCounter][colCounter] );
+          colCounter++;
+        }
+        printf("\n");
+        rowCounter++;
+      }
+    }
+
     return Scores;
   }
 
@@ -490,10 +518,12 @@ public:
       tracking_ids.clear();
       return tracking_ids;
     }
-    if (oldHist->empty())
-    { //First time of calling OR format ids. Start from the beginning. Re-initialise id counter.
-      std::cout << "\n\nNEW HIST IS NOT EMPTY - OLD HIS IS EMPTY\n\n";
+    if (oldHist->empty() &&(!compare_everything || dissapearedIds.empty()) )// We must add to the condition: && dissapearedIds.empty() . Generally, adding this seems more corect but dose not produce good results.
+    {
+       //First time of calling OR format ids. Start from the beginning. Re-initialise id counter.
+      std::cout << "\n\nNEW HIST IS NOT EMPTY - OLD HIS IS EMPTY \n\n";
       //tracking_ids.reserve(newHist->size());
+      //Probably add something to compare the new ids to the dissapeared ones.
       int i;
       for (i = newId; i < newHist->size(); i++)
       {
@@ -502,16 +532,23 @@ public:
       newId = i; 
       return tracking_ids;
     }
-    std::cout << "\n\nBOATH NEW AND OLD HIST ARE NOT EMPTY\n\n";
+
+    
     std::vector<std::tuple<int, int>> maxPos; //Stores the positions of the maximum elements, in decending order
     //(from the position of the globally greater element -> the position of the globally minimum element.)
 
     //The Scores matrix - vecotr may not be square. In this case, either a new person was detected or an old person disapears.
-    int rows = Scores.size();
-    //int rows = oldHist->size();
-    int columns = Scores[0].size();
-    //int columns = newHist->size();
+    //int rows = Scores.size();
+    int rows = oldHist->size();
+    //int columns = Scores[0].size();
+    int columns = newHist->size();
 
+    //Create an  new vector of size columns. This will store the new ids.
+    std::vector<int> newIds(columns, -1);
+
+    //if(!oldHist->empty())
+    
+    std::cout << "\n\nBOATH NEW AND OLD HIST ARE NOT EMPTY\n\n";
     //if rows > columns -> A person disapeared.
     //if rows < columns -> A person apeared.
     int iterations = (rows < columns) ? rows : columns;
@@ -560,8 +597,6 @@ public:
     for (std::vector<std::tuple<int, int>>::iterator i = maxPos.begin(); i != maxPos.end(); ++i)
       std::cout << " Position: " << std::get<0>(*i) << " -> " << std::get<1>(*i) << "  ID: " << tracking_ids[std::get<0>(*i)] << "\n";
 
-    //Create an  new vector of size columns. This will store the new ids.
-    std::vector<int> newIds(columns, -1);
 
     for (std::vector<std::tuple<int, int>>::iterator itMatchIds = maxPos.begin(); itMatchIds != maxPos.end(); ++itMatchIds)
     {
@@ -594,6 +629,7 @@ public:
       }
       order++;
     }
+    
 
     while (dissapearedIds.size() > old_histogram_memory_size)
     {
@@ -779,8 +815,6 @@ public:
     }
 
     */
-
-
     tracking_ids.clear();
     tracking_ids = newIds;
     for( auto l : tracking_ids){
@@ -815,15 +849,23 @@ public:
     //Get the skeleton points and store them.
     //We need those points for the feature extraction (e.g. histogram) before we draw lines on the image. That's why we have two main loops on this loop.
     humanEdges.clear();
+
+    //We keep the coordinates of main human points.
+    oldHumanPlaces->clear();
+    *oldHumanPlaces = *newHumanPlaces;
+    newHumanPlaces->clear();
+
     std::vector<int> pickedHumans; //Used to know for whitch humans we drew the histogram.
     int k=-1;
     for (std::vector<openpose_ros_msgs::OpenPoseHuman>::iterator itPersona = humans.begin(); itPersona != humans.end(); ++itPersona) //Loop for every skeleton (human).
     {
       k++;
       std::vector<cv::Point> oneHumanEdges;
+      bool flag = false;
       for (std::vector<std::tuple<int, int>>::iterator it = tl.begin(); it != tl.end(); ++it) //Iterate for all points on a single detected skeleton (human).
       {
-        //Ignore points with zero probability.
+
+        //Ignore points with low probability.
         if (itPersona->body_key_points_with_prob[std::get<1>(*it)].prob < threshold_skeleton_posibility || itPersona->body_key_points_with_prob[std::get<0>(*it)].prob < threshold_skeleton_posibility) //Twick these values!
           continue;
         cv::Point edge1 = cv::Point(itPersona->body_key_points_with_prob[std::get<0>(*it)].x, itPersona->body_key_points_with_prob[std::get<0>(*it)].y);
@@ -835,8 +877,16 @@ public:
           //Store the two edges of the line.
           oneHumanEdges.push_back(edge1);
           oneHumanEdges.push_back(edge2);
+
+          //Store the main point of each man
+          if(std::get<0>(*it) == 1 && !flag ) {newHumanPlaces->push_back(edge1); flag = true;}
+          else if(std::get<1>(*it) == 1 && !flag ) {newHumanPlaces->push_back(edge2); flag = true;}
+
         }
+        
       }
+
+
       //Store the oneHuman line edges in the vector. Edges will be used on color feature extraction (ColorHistogram).
       if(oneHumanEdges.empty()) continue; 
       humanEdges.push_back(oneHumanEdges);
@@ -845,7 +895,13 @@ public:
     }
 
     VisualFeatures();
-    std::vector<std::vector<double>> Scores = FramesFeatureComparison(oldHist, newHist);
+    std::vector<std::vector<double>> Scores;
+    if(use_spacial_locality_too ==0)
+      Scores = FramesFeatureComparison(oldHist, newHist);
+    else
+      Scores = FramesFeatureComparison(oldHist, newHist, oldHumanPlaces, newHumanPlaces);
+
+    std::cout <<"\nThis is the special locality param: " <<use_spacial_locality_too <<"  \n";
     std::vector<int> &tracking_ids = ReIdentification(Scores);
 
     std::cout << "\n\n Tracking ids Vector Printing \n";
@@ -952,23 +1008,24 @@ int main(int argc, char **argv)
   ros::init(argc, argv, "skeleton_visualiser");
   ros::NodeHandle n;
   //Load the parameters from *.yamal file, if it exists.
-  n.param("CAMERA_TOPIC", camera_topic, CAMERA_TOPIC);
-  n.param("OPENPOSE_ROS_TOPIC", openpose_ros_topic, OPENPOSE_ROS_TOPIC);
-  n.param("OUTPUT_VIDEO_TOPIC", output_video_topic, OUTPUT_VIDEO_TOPIC);
-  n.param("OUTPUT_HISTOGRAM_TOPIC", output_histogram_topic, OUTPUT_HISTOGRAM_TOPIC);
-  n.param("OUTPUT_SKELETON_POINTS", output_skeleton_points, OUTPUT_SKELETON_POINTS);
-  n.param("IDS", ids, IDS);
-  n.param("NUM_OF_BINS", num_of_bins, NUM_OF_BINS);
-  n.param("THRESHOLD_SKELETON_POSIBILITY", threshold_skeleton_posibility, THRESHOLD_SKELETON_POSIBILITY);
-  n.param("LOWEST_POSIBILITY_MATCHING", lowest_posibility_matching, LOWEST_POSIBILITY_MATCHING);
-  n.param("LOWEST_POSIBILITY_REMATCHING", lowest_posibility_rematching, LOWEST_POSIBILITY_REMATCHING);
-  n.param("OLD_HISTOGRAM_MEMORY_SIZE", old_histogram_memory_size, OLD_HISTOGRAM_MEMORY_SIZE);
-  n.param("LOOP_RATE", loop_rate, LOOP_RATE);
-  n.param("LINE_WIDTH", line_width, LINE_WIDTH);
-  n.param("COMPARE_METHOD", compare_method, COMPARE_METHOD);
-  n.param("FEATURE_EXTRACTOR_METHOD", feature_extractor_method, FEATURE_EXTRACTOR_METHOD);
-  n.param("AND_SPINE", and_spine, AND_SPINE);
-
+  n.param("image_processing_by_pose/CAMERA_TOPIC", camera_topic, CAMERA_TOPIC);
+  n.param("image_processing_by_pose/OPENPOSE_ROS_TOPIC", openpose_ros_topic, OPENPOSE_ROS_TOPIC);
+  n.param("image_processing_by_pose/OUTPUT_VIDEO_TOPIC", output_video_topic, OUTPUT_VIDEO_TOPIC);
+  n.param("image_processing_by_pose/OUTPUT_HISTOGRAM_TOPIC", output_histogram_topic, OUTPUT_HISTOGRAM_TOPIC);
+  n.param("image_processing_by_pose/OUTPUT_SKELETON_POINTS", output_skeleton_points, OUTPUT_SKELETON_POINTS);
+  n.param("image_processing_by_pose/IDS", ids, IDS);
+  n.param("image_processing_by_pose/NUM_OF_BINS", num_of_bins, NUM_OF_BINS);
+  n.param("image_processing_by_pose/THRESHOLD_SKELETON_POSIBILITY", threshold_skeleton_posibility, THRESHOLD_SKELETON_POSIBILITY);
+  n.param("image_processing_by_pose/LOWEST_POSIBILITY_MATCHING", lowest_posibility_matching, LOWEST_POSIBILITY_MATCHING);
+  n.param("image_processing_by_pose/LOWEST_POSIBILITY_REMATCHING", lowest_posibility_rematching, LOWEST_POSIBILITY_REMATCHING);
+  n.param("image_processing_by_pose/OLD_HISTOGRAM_MEMORY_SIZE", old_histogram_memory_size, OLD_HISTOGRAM_MEMORY_SIZE);
+  n.param("image_processing_by_pose/LOOP_RATE", loop_rate, LOOP_RATE);
+  n.param("image_processing_by_pose/LINE_WIDTH", line_width, LINE_WIDTH);
+  n.param("image_processing_by_pose/COMPARE_METHOD", compare_method, COMPARE_METHOD);
+  n.param("image_processing_by_pose/FEATURE_EXTRACTOR_METHOD", feature_extractor_method, FEATURE_EXTRACTOR_METHOD);
+  n.param("image_processing_by_pose/AND_SPINE", and_spine, AND_SPINE);
+  n.param("image_processing_by_pose/USE_SPACIAL_LOCALITY_TOO", use_spacial_locality_too, USE_SPACIAL_LOCALITY_TOO);
+   n.param("image_processing_by_pose/COMPARE_EVERYTHING", compare_everything, COMPARE_EVERYTHING);
   ImageConverter ic;
   //ros::spin();
   ros::Rate loop_rate(loop_rate); //Determine the fps.

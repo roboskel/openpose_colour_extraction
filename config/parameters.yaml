@@ -1,7 +1,7 @@
 NUM_OF_BINS: 80                      #Max: 256 You may twick this value!
 THRESHOLD_SKELETON_POSIBILITY: 0.45  #Over this possibility the points will be detected.
-LOWEST_POSIBILITY_MATCHING: 0.1      #Over this possibility we match an id of the previous frame to an id of the new frame.
-LOWEST_POSIBILITY_REMATCHING: 0.1    #Over this possibility we match an old dissapeared id to a newly apeared.
+LOWEST_POSIBILITY_MATCHING: 0.1     #Over this possibility we match an id of the previous frame to an id of the new frame. Default: 0.1
+LOWEST_POSIBILITY_REMATCHING: 0.1    #Over this possibility we match an old dissapeared id to a newly apeared. Default: 0.1
 OLD_HISTOGRAM_MEMORY_SIZE: 10        #Size of the buffer of dissapeared histograms. If this is too big the algorithm will run slow.
 LOOP_RATE: 60                        #The rate at withch the node recieves a new image. Publishing rates are also affected.
 LINE_WIDTH: 4                        #If > 1 then in the process of mask creation, adjacent pixels to the line are included.
@@ -18,6 +18,11 @@ FEATURE_EXTRACTOR_METHOD: 2  # 0 -> simple 1 chanell color histogram. Usefull if
                              # 2 -> 2D HS histogram
 AND_SPINE: 1 # 1-> feature extraction from shoulder and spine points.
              # 0-> feature extraction from shoulders only.
+USE_SPACIAL_LOCALITY_TOO: 1     # 1-> use boath visual features and spatial proximity for tracking.
+                                # 0-> use only visual features.
+COMPARE_EVERYTHING: 1 #A cornercase. When dissapeared ids are not empty but old histogram is empty and new is not empty, check if the new person(s) match
+                           # to a dissapeared histogram and if they do, do not create a new id (to do so, set COMPARE_EVERYTHING to 1). Otherwise, if old histogram is empty and new is not then new ids will
+                           #be created for sure. Seems to be better when set to 0.
 CAMERA_TOPIC: "/camera/rgb/image_raw"
 OPENPOSE_ROS_TOPIC: "/openpose_ros/human_list"
 OUTPUT_VIDEO_TOPIC: "/image_converter/output_video"
