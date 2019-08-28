@@ -1,0 +1,33 @@
+NUM_OF_BINS: 80                      #Max: 256 You may twick this value!
+THRESHOLD_SKELETON_POSIBILITY: 0.45  #Over this possibility the points will be detected.
+LOWEST_POSIBILITY_MATCHING: 0.1     #Over this possibility we match an id of the previous frame to an id of the new frame. Default: 0.1
+LOWEST_POSIBILITY_REMATCHING: 0.1    #Over this possibility we match an old dissapeared id to a newly apeared. Default: 0.1
+OLD_HISTOGRAM_MEMORY_SIZE: 10        #Size of the buffer of dissapeared histograms. If this is too big the algorithm will run slow.
+LOOP_RATE: 60                        #The rate at withch the node recieves a new image. Publishing rates are also affected.
+LINE_WIDTH: 4                        #If > 1 then in the process of mask creation, adjacent pixels to the line are included.
+COMPARE_METHOD: 0    # 0 -> Correlation
+                     # 1 -> Chi-Square
+                     # 2 -> Intersection
+                     # 3 -> Bhattacharyya distance
+                     # Carefull! For the Chi-Square and Bhattacharyya distance methods, the lower the metric, the more accurate the match.
+                     #Consequently, if we use 1 or 3 methods we need to amend the code and alter the inequalities in the 
+                     #Reidentification method so as to find the minimum element.
+                     #If the comparing method changes, the possibility thresholds (apart from THRESHOLD_SKELETON_POSIBILITY) should change too.
+FEATURE_EXTRACTOR_METHOD: 2  # 0 -> simple 1 chanell color histogram. Usefull if we want to plot the histogram of an image.
+                             # 1 -> 3D color histogram
+                             # 2 -> 2D HS histogram
+AND_SPINE: 1 # 1-> feature extraction from shoulder and spine points.
+             # 0-> feature extraction from shoulders only.
+USE_SPACIAL_LOCALITY_TOO: 1     # 1-> use boath visual features and spatial proximity for tracking.
+                                # 0-> use only visual features.
+COMPARE_EVERYTHING: 1 #A cornercase. When dissapeared ids are not empty but old histogram is empty and new is not empty, check if the new person(s) match
+                           # to a dissapeared histogram and if they do, do not create a new id (to do so, set COMPARE_EVERYTHING to 1). Otherwise, if old histogram is empty and new is not then new ids will
+                           #be created for sure. Seems to be better when set to 0 althow it is wrong.
+PROXIMITY_WEIGHT: 2 #It only makes sence if USE_SPACIAL_LOCALITY_TOO ==1. Scores for comparison use two metrics: 1- how much the histograms look alike and 2- how close the skeletons are.
+                           #By setting proximity weight high, the proximity is more important than histogram comparison. Default: 1 If the ppl are moving fast then consider increasing this.
+CAMERA_TOPIC: "/camera/rgb/image_raw"
+OPENPOSE_ROS_TOPIC: "/openpose_ros/human_list"
+OUTPUT_VIDEO_TOPIC: "/image_converter/output_video"
+OUTPUT_HISTOGRAM_TOPIC: "/Histogram"
+OUTPUT_SKELETON_POINTS: "/skeleton_points"
+IDS: "/id_array"
